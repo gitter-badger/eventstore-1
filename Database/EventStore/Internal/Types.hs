@@ -592,6 +592,12 @@ keepRetrying :: Retry
 keepRetrying = KeepRetrying
 
 --------------------------------------------------------------------------------
+-- | Type of the connection between the client and the server
+data ConnectionType
+    = Uncrypted
+    | Encrypted
+
+--------------------------------------------------------------------------------
 -- | Global 'Connection' settings
 data Settings
     = Settings
@@ -601,6 +607,7 @@ data Settings
       , s_credentials          :: Maybe Credentials
       , s_retry                :: Retry
       , s_reconnect_delay_secs :: Int -- ^ In seconds
+      , s_connectionType       :: ConnectionType
       }
 
 --------------------------------------------------------------------------------
@@ -613,6 +620,7 @@ defaultSettings = Settings
                   , s_credentials          = Nothing
                   , s_retry                = atMost 3
                   , s_reconnect_delay_secs = 3
+                  , s_connectionType       = Uncrypted
                   }
 
 --------------------------------------------------------------------------------

@@ -83,11 +83,13 @@ secs = 1000000
 
 --------------------------------------------------------------------------------
 connect :: Settings -> HostName -> Int -> IO Connection
-connect _ host port = do
+connect setts host port = do
     hdl <- connectTo host (PortNumber $ fromIntegral port)
     hSetBuffering hdl NoBuffering
     uuid <- randomIO
-    return $ regularConnection hdl uuid
+    case s_connectionType setts of
+        Uncrypted -> return $ regularConnection hdl uuid
+        Encrypted -> encryptedConnection hdl uuid
 
 --------------------------------------------------------------------------------
 regularConnection :: Handle -> UUID -> Connection
@@ -99,3 +101,7 @@ regularConnection h uuid =
     , connSend  = B.hPut h
     , connRecv  = B.hGet h
     }
+
+--------------------------------------------------------------------------------
+encryptedConnection :: Handle -> UUID -> IO Connection
+encryptedConnection = undefined
