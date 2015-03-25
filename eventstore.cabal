@@ -91,7 +91,8 @@ library
                      , text       >=1.1.1    && <1.3
                      , time       >=1.4      && <1.6
                      , uuid       ==1.3.*
-                     , tls
+                     , connection ==0.2.*
+                     , data-default-class
 
   -- Directories containing source files.
   -- hs-source-dirs:

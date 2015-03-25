@@ -39,7 +39,6 @@ import Text.Printf
 --------------------------------------------------------------------------------
 import Data.UUID
 import FRP.Sodium
-import Network
 
 --------------------------------------------------------------------------------
 import Database.EventStore.Internal.Connection
@@ -56,7 +55,7 @@ import Database.EventStore.Internal.Writer
 --------------------------------------------------------------------------------
 data Processor
     = Processor
-      { processorConnect        :: HostName -> Int -> IO ()
+      { processorConnect        :: IO ()
       , processorShutdown       :: IO ()
       , processorNewOperation   :: OperationParams -> IO ()
       , processorNewSubcription :: NewSubscriptionCB
@@ -74,16 +73,14 @@ data State
     | Online
       { _uuidCon      :: !UUID
       , _packageCount :: !Int
-      , _host         :: !HostName
-      , _port         :: !Int
       , _cleanup      :: !(IO ())
       }
 
 --------------------------------------------------------------------------------
 -- Event
 --------------------------------------------------------------------------------
-data Connect     = Connect HostName Int
-data Connected   = Connected HostName Int UUID (IO ())
+data Connect     = Connect
+data Connected   = Connected UUID (IO ())
 data Cleanup     = Cleanup
 data Reconnect   = Reconnect
 data Reconnected = Reconnected UUID (IO ())
@@ -119,8 +116,6 @@ network sett chan = do
     let heartbeatP pkg = packageCmd pkg == heartbeatRequestCmd
         onlyHeartbeats = filterE heartbeatP onReceived
 
-        con_snap   = fmap connectSnapshot onConnect
-        reco_snap  = snapshot reconnectSnapshot onReconnect stateB
         clean_snap = snapshot cleanupSnapshot onCleanup stateB
 
         full_reco c = do
@@ -131,26 +126,22 @@ network sett chan = do
         push_recv_io  = \pkg -> sync $ pushReceived pkg
         push_recod_io = pushAsync2 $ \u c -> pushReconnected $ Reconnected u c
         push_send_io  = pushAsync pushSend
-        push_con_io   = pushAsync4 $ \h p u c ->
-                                      pushConnected $ Connected h p u c
+        push_con_io   = pushAsync2 $ \u c ->
+                                      pushConnected $ Connected u c
 
-    _ <- listen con_snap $ \(ConnectionSnapshot host port) ->
+    _ <- listen onConnect $ \_ ->
              connection sett
                         chan
                         push_recv_io
-                        (push_con_io host port)
+                        push_con_io
                         push_reco_io
-                        host
-                        port
 
-    _ <- listen reco_snap $ \(ConnectionSnapshot host port) ->
+    _ <- listen onReconnect $ \_ ->
              connection sett
                         chan
                         push_recv_io
                         push_recod_io
                         push_reco_io
-                        host
-                        port
 
     _ <- listen clean_snap $ \(CleanupSnapshot finalizer) -> finalizer
 
@@ -159,11 +150,11 @@ network sett chan = do
 
     let processor =
             Processor
-            { processorConnect        = \h p -> void $ forkIO $
-                                                sync $ pushConnect $ Connect h p
-            , processorShutdown       = void $ forkIO $ sync $
+            { processorConnect = void $ forkIO $
+                                 sync $ pushConnect Connect
+            , processorShutdown = void $ forkIO $ sync $
                                         pushCleanup Cleanup
-            , processorNewOperation   = \o -> void $ forkIO $
+            , processorNewOperation = \o -> void $ forkIO $
                                               sync $ push_new_op o
             , processorNewSubcription = push_sub
             }
@@ -175,31 +166,14 @@ network sett chan = do
 --------------------------------------------------------------------------------
 -- Observer
 --------------------------------------------------------------------------------
-data ConnectionSnapshot
-    = ConnectionSnapshot
-      { _conHost :: !HostName
-      , _conPort :: !Int
-      }
-
---------------------------------------------------------------------------------
-connectSnapshot :: Connect -> ConnectionSnapshot
-connectSnapshot (Connect host port) =
-    ConnectionSnapshot
-    { _conHost = host
-    , _conPort = port
-    }
-
---------------------------------------------------------------------------------
 connection :: Settings
            -> Chan Package
            -> (Package -> IO ())
            -> (UUID -> IO () -> IO ())
            -> IO ()
-           -> HostName
-           -> Int
            -> IO ()
-connection sett chan push_pkg push_con push_reco host port = do
-    conn <- newConnection sett host port
+connection sett chan push_pkg push_con push_reco = do
+    conn <- newConnection sett
     rid  <- forkFinally (readerThread push_pkg conn) (recovering push_reco)
     wid  <- forkFinally (writerThread chan conn) (recovering push_reco)
     push_con (connUUID conn) $ do
@@ -222,14 +196,6 @@ recovering recover (Left some_ex) = do
 recovering _ _ = return ()
 
 --------------------------------------------------------------------------------
-reconnectSnapshot :: Reconnect -> State -> ConnectionSnapshot
-reconnectSnapshot _ s =
-    ConnectionSnapshot
-    { _conHost  = _host s
-    , _conPort  = _port s
-    }
-
---------------------------------------------------------------------------------
 newtype CleanupSnapshot = CleanupSnapshot (IO ())
 
 --------------------------------------------------------------------------------
@@ -245,14 +211,12 @@ cleanupSnapshot _ s =
 -- Model
 --------------------------------------------------------------------------------
 connected :: Connected -> State -> State
-connected (Connected host port uuid cl) s =
+connected (Connected uuid cl) s =
     case s of
         Offline
             -> Online
                { _uuidCon      = uuid
                , _packageCount = 0
-               , _host         = host
-               , _port         = port
                , _cleanup      = cl
                }
         _ -> s

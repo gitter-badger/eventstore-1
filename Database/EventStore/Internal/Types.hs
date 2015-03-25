@@ -608,20 +608,32 @@ data Settings
       , s_retry                :: Retry
       , s_reconnect_delay_secs :: Int -- ^ In seconds
       , s_connectionType       :: ConnectionType
+      , s_hostname             :: String
+      , s_port                 :: Int
       }
 
 --------------------------------------------------------------------------------
 -- | Default global settings.
-defaultSettings :: Settings
-defaultSettings = Settings
-                  { s_heartbeatInterval    = msDiffTime 750  -- 750ms
-                  , s_heartbeatTimeout     = msDiffTime 1500 -- 1500ms
-                  , s_requireMaster        = True
-                  , s_credentials          = Nothing
-                  , s_retry                = atMost 3
-                  , s_reconnect_delay_secs = 3
-                  , s_connectionType       = Uncrypted
-                  }
+defaultSettings :: String -> Settings
+defaultSettings h = Settings
+                    { s_heartbeatInterval    = msDiffTime 750  -- 750ms
+                    , s_heartbeatTimeout     = msDiffTime 1500 -- 1500ms
+                    , s_requireMaster        = True
+                    , s_credentials          = Nothing
+                    , s_retry                = atMost 3
+                    , s_reconnect_delay_secs = 3
+                    , s_connectionType       = Uncrypted
+                    , s_hostname             = h
+                    , s_port                 = 1113
+                    }
+
+--------------------------------------------------------------------------------
+-- | Default encrypted global settings
+encryptedSettings :: String -> Int -> Settings
+encryptedSettings h p = (defaultSettings h)
+                        { s_connectionType = Encrypted
+                        , s_port           = p
+                        }
 
 --------------------------------------------------------------------------------
 -- | Millisecond timespan

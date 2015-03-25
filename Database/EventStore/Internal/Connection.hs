@@ -31,9 +31,11 @@ import           System.IO
 import           Text.Printf
 
 --------------------------------------------------------------------------------
-import Data.UUID
-import Network
-import System.Random
+import           Data.Default.Class
+import           Data.UUID
+import           Network
+import qualified Network.Connection as TLS
+import           System.Random
 
 --------------------------------------------------------------------------------
 import Database.EventStore.Internal.Types
@@ -57,21 +59,23 @@ data Connection =
     }
 
 --------------------------------------------------------------------------------
-newConnection :: Settings -> HostName -> Int -> IO Connection
-newConnection sett host port =
+newConnection :: Settings -> IO Connection
+newConnection sett =
     case s_retry sett of
         AtMost n ->
             let loop i = do
                     printf "Connecting...Attempt %d\n" i
-                    catch (connect sett host port) $ \(_ :: SomeException) -> do
+                    catch (connect sett) $ \(_ :: SomeException) -> do
                         threadDelay delay
+                        let host = s_hostname sett
+                            port = s_port sett
                         if n <= i then throwIO $ MaxAttempt host port n
                                   else loop (i + 1) in
              loop 1
         KeepRetrying ->
             let endlessly i = do
                     printf "Connecting...Attempt %d\n" i
-                    catch (connect sett host port) $ \(_ :: SomeException) -> do
+                    catch (connect sett) $ \(_ :: SomeException) -> do
                         threadDelay delay >> endlessly (i + 1) in
              endlessly (1 :: Int)
   where
@@ -82,26 +86,54 @@ secs :: Int
 secs = 1000000
 
 --------------------------------------------------------------------------------
-connect :: Settings -> HostName -> Int -> IO Connection
-connect setts host port = do
+connect :: Settings -> IO Connection
+connect sett =
+    case s_connectionType sett of
+        Uncrypted -> regularConnection sett
+        Encrypted -> encryptedConnection sett
+
+--------------------------------------------------------------------------------
+regularConnection :: Settings -> IO Connection
+regularConnection sett = do
     hdl <- connectTo host (PortNumber $ fromIntegral port)
     hSetBuffering hdl NoBuffering
     uuid <- randomIO
-    case s_connectionType setts of
-        Uncrypted -> return $ regularConnection hdl uuid
-        Encrypted -> encryptedConnection hdl uuid
+    return Connection
+           { connUUID  = uuid
+           , connClose = hClose hdl
+           , connFlush = hFlush hdl
+           , connSend  = B.hPut hdl
+           , connRecv  = B.hGet hdl
+           }
+  where
+    host = s_hostname sett
+    port = s_port sett
 
 --------------------------------------------------------------------------------
-regularConnection :: Handle -> UUID -> Connection
-regularConnection h uuid =
-    Connection
-    { connUUID  = uuid
-    , connClose = hClose h
-    , connFlush = hFlush h
-    , connSend  = B.hPut h
-    , connRecv  = B.hGet h
-    }
+encryptedConnection :: Settings -> IO Connection
+encryptedConnection sett = do
+    ctx  <- TLS.initConnectionContext
+    conn <- TLS.connectTo ctx connParams
+    uuid <- randomIO
+    return Connection
+           { connUUID  = uuid
+           , connClose = TLS.connectionClose conn
+           , connFlush = return ()
+           , connSend  = TLS.connectionPut conn
+           , connRecv  = TLS.connectionGet conn
+           }
+  where
+    host = s_hostname sett
+    port = s_port sett
 
---------------------------------------------------------------------------------
-encryptedConnection :: Handle -> UUID -> IO Connection
-encryptedConnection = undefined
+    tsimple =
+      def
+      { TLS.settingDisableCertificateValidation = True }
+
+    connParams =
+        TLS.ConnectionParams
+        { TLS.connectionHostname  = host
+        , TLS.connectionPort      = fromIntegral port
+        , TLS.connectionUseSecure = Just tsimple
+        , TLS.connectionUseSocks  = Nothing
+        }

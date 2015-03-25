@@ -24,10 +24,12 @@ module Database.EventStore
     , Credentials
     , Settings(..)
     , Retry
+    , ConnectionType(..)
     , atMost
     , keepRetrying
     , credentials
     , defaultSettings
+    , encryptedSettings
     , connect
     , shutdown
      -- * Read Operations
@@ -140,13 +142,10 @@ data Connection
 --   or a single thread can make many asynchronous requests. To get the most
 --   performance out of the connection it is generally recommend to use it in
 --   this way.
-connect :: Settings
-        -> String   -- ^ HostName
-        -> Int      -- ^ Port
-        -> IO Connection
-connect settings host port = do
+connect :: Settings -> IO Connection
+connect settings = do
     processor <- newProcessor settings
-    processorConnect processor host port
+    processorConnect processor
 
     return $ Connection processor settings
 
